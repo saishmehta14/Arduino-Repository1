@@ -2,7 +2,7 @@
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
 #include <WiFiS3.h>
-#include "secrets.h"
+#include <secrets.h>
 // Define PWM pins for the Red, Green, and Blue legs
 // TDS Sensor Meter V1.0 - Water Quality Monitor
 // Test change to the file.
@@ -26,33 +26,13 @@ void connectWiFi();
 
 void setup()
 {
-
-  pinMode(TdsSensorPin, INPUT);
-
   Serial.begin(9600); // Start the serial monitor
-  // display.begin(SSD1306_SWITCHCAPVCC,  0x3C );
-
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-  {
-    Serial.println(F("SSD1306 allocation failed"));
-    for (;;)
-      ; // Don't proceed, loop forever
-  }
-
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println(F("Connecting WiFi..."));
-  display.display();
-
   connectWiFi();
-
-  server.begin();
   Serial.print("Open this page in your browser: http://");
   Serial.println(WiFi.localIP());
-
-  delay(3000);
+  pinMode(TdsSensorPin, INPUT);
+  display.begin(SSD1306_SWITCHCAPVCC,  0x3C );
+  server.begin();
 }
 
 void loop()
@@ -206,14 +186,14 @@ String getWaterQuality()
 void connectWiFi()
 {
   Serial.print("Connecting to ");
-  Serial.println("(wifi name)");
+  Serial.println("HS");
 
   for (int attempt = 1; attempt <= 10; attempt++)
   {
     Serial.print("Attempt ");
     Serial.println(attempt);
 
-    WiFi.begin("wifi name", "wifi passcode");
+    WiFi.begin("HS", "q2w3e4r5");
 
     if (WiFi.status() == WL_CONNECTED)
     {
@@ -229,4 +209,3 @@ void connectWiFi()
 
   Serial.println("WiFi connection failed");
 }
-//Test Change//
