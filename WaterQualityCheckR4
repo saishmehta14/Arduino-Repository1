@@ -1,0 +1,231 @@
+#include <Arduino.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_GFX.h>
+#include <WiFiS3.h>
+#include "secrets.h"
+// Define PWM pins for the Red, Green, and Blue legs
+// TDS Sensor Meter V1.0 - Water Quality Monitor
+// Test change to the file.
+#define TdsSensorPin A1
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+int sensorValue = 0;
+float voltage = 0.0;
+float tdsValue = 0.0;
+WiFiServer server(80); // Web server on port 80
+
+String getWaterQuality();
+void handleWebPage();
+void sendMainPage(WiFiClient &client);
+void sendReadings(WiFiClient &client);
+void sendReadingsHtml(WiFiClient &client);
+void connectWiFi();
+
+void setup()
+{
+
+  pinMode(TdsSensorPin, INPUT);
+
+  Serial.begin(9600); // Start the serial monitor
+  // display.begin(SSD1306_SWITCHCAPVCC,  0x3C );
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+  {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;)
+      ; // Don't proceed, loop forever
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(F("Connecting WiFi..."));
+  display.display();
+
+  connectWiFi();
+
+  server.begin();
+  Serial.print("Open this page in your browser: http://");
+  Serial.println(WiFi.localIP());
+
+  delay(3000);
+}
+
+void loop()
+{
+  // Read the analog value from the sensor
+  sensorValue = analogRead(TdsSensorPin);
+
+  // Convert the analog reading (0-1023) to voltage (assuming 5V reference)
+  voltage = sensorValue * 5.0 / 1024.0;
+
+  // Convert voltage to TDS value (ppm) using the calibration formula
+  tdsValue = abs(133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * 0.5;
+
+  // Print numerical results
+  Serial.print("~TDS: ");
+  Serial.print(tdsValue, 0); // Display as integer
+  Serial.println(" ppm | Quality: ");
+
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print(tdsValue);
+  display.println("ppm");
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 24);
+  display.setTextSize(1);
+  display.println(getWaterQuality());
+  display.setCursor(0, 56);
+  display.display();
+
+  handleWebPage(); // Send the latest reading to anyone viewing the webpage
+
+  delay(2000); // Wait 2 seconds between readings
+}
+
+void handleWebPage()
+{
+  WiFiClient client = server.available();
+  if (!client)
+  {
+    return; // Nobody is visiting the page
+  }
+
+  // The first line says what the browser wants, e.g. "GET /data HTTP/1.1"
+  String request = client.readStringUntil('\n');
+
+  // Skip the rest of the request until the blank line that ends it
+  while (client.connected())
+  {
+    String line = client.readStringUntil('\n');
+    if (line == "\r" || line == "")
+    {
+      break;
+    }
+  }
+
+  if (request.startsWith("GET /data"))
+  {
+    sendReadings(client); // The page asking for new numbers
+  }
+  else
+  {
+    sendMainPage(client); // First visit: send the full page
+  }
+
+  delay(10); // Give the browser time to receive the response
+  client.stop();
+}
+
+// The full webpage. It is sent once, then its script updates the readings.
+void sendMainPage(WiFiClient &client)
+{
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: text/html");
+  client.println("Connection: close");
+  client.println();
+
+  client.println("<html>");
+  client.println("<head>");
+  client.println("<title>TDS Monitor</title>");
+  client.println("<meta name='viewport' content='width=device-width, initial-scale=1'>");
+  client.println("</head>");
+  client.println("<body style='font-family: Arial; text-align: center;'>");
+  client.println("<h1>Water Quality Monitor</h1>");
+
+  client.println("<div id='readings'>");
+  sendReadingsHtml(client);
+  client.println("</div>");
+
+  // Every 2 seconds, ask the board for new readings and swap them in
+  client.println("<script>");
+  client.println("setInterval(function () {");
+  client.println("  fetch('/data')");
+  client.println("    .then(function (response) { return response.text(); })");
+  client.println("    .then(function (html) { document.getElementById('readings').innerHTML = html; });");
+  client.println("}, 2000);");
+  client.println("</script>");
+
+  client.println("</body>");
+  client.println("</html>");
+}
+
+// Only the readings, used by the page's script to update itself
+void sendReadings(WiFiClient &client)
+{
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: text/html");
+  client.println("Cache-Control: no-store"); // Always get fresh numbers
+  client.println("Connection: close");
+  client.println();
+
+  sendReadingsHtml(client);
+}
+
+void sendReadingsHtml(WiFiClient &client)
+{
+  client.print("<h2>TDS: ");
+  client.print(tdsValue, 0);
+  client.println(" ppm</h2>");
+
+  client.print("<h2>Quality: ");
+  client.print(getWaterQuality());
+  client.println("</h2>");
+}
+
+String getWaterQuality()
+{
+  if (tdsValue < 50)
+  {
+    return "Excellent";
+  }
+  else if (tdsValue < 150)
+  {
+    return "Good";
+  }
+  else if (tdsValue < 300)
+  {
+    return "Fair (Harder water)";
+  }
+  else if (tdsValue <= 500)
+  {
+    return "Poor";
+  }
+  else
+  {
+    return "Unacceptable (Do not drink!)";
+  }
+}
+
+void connectWiFi()
+{
+  Serial.print("Connecting to ");
+  Serial.println("(wifi name)");
+
+  for (int attempt = 1; attempt <= 10; attempt++)
+  {
+    Serial.print("Attempt ");
+    Serial.println(attempt);
+
+    WiFi.begin("wifi name", "wifi passcode");
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      // Give the router a moment to assign an IP address
+      delay(2000);
+      Serial.print("Connected! IP: ");
+      Serial.println(WiFi.localIP());
+      return;
+    }
+
+    delay(2000);
+  }
+
+  Serial.println("WiFi connection failed");
+}
